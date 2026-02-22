@@ -1,0 +1,708 @@
+// AwgSimulator.jsx
+// React + Three.js (React Three Fiber) interactive 3D AWG simulator skeleton
+// Usage: import AwgSimulator from "./AwgSimulator"; render <AwgSimulator />
+
+import React, { useMemo, useRef, useState, useEffect } from "react";
+import * as THREE from "three";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { Environment, OrbitControls, Html } from "@react-three/drei";
+import gsap from "gsap";
+import { Leva, useControls } from "leva";
+
+const STEPS = [
+  { key: "air", title: "Entrada de aire" },
+  { key: "condensation", title: "Condensación" },
+  { key: "filtration", title: "Filtración" },
+  { key: "uv_tank", title: "UV + Tanque" },
+  { key: "dispense", title: "Dispensado" },
+  { key: "mineral", title: "Mineralización" },
+];
+
+function clamp01(v) {
+  return Math.max(0, Math.min(1, v));
+}
+
+function Particles({
+  count = 900,
+  color = "#7dd3fc",
+  size = 0.012,
+  speed = 0.35,
+  active = true,
+  box = [1.2, 0.6, 0.6],
+  direction = [1, 0, 0],
+  swirl = 0.0,
+}) {
+  const points = useRef();
+
+  const dir = useMemo(() => {
+    const d = new THREE.Vector3(direction[0], direction[1], direction[2]);
+    if (d.length() === 0) d.set(1, 0, 0);
+    d.normalize();
+    return d;
+  }, [direction]);
+
+  const positions = useMemo(() => {
+    const arr = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      arr[i * 3 + 0] = (Math.random() - 0.5) * box[0];
+      arr[i * 3 + 1] = (Math.random() - 0.5) * box[1];
+      arr[i * 3 + 2] = (Math.random() - 0.5) * box[2];
+    }
+    return arr;
+  }, [count, box]);
+
+  const phases = useMemo(() => {
+    const arr = new Float32Array(count);
+    for (let i = 0; i < count; i++) arr[i] = Math.random() * Math.PI * 2;
+    return arr;
+  }, [count]);
+
+  useFrame((state, delta) => {
+    if (!active || !points.current) return;
+    const pos = points.current.geometry.attributes.position.array;
+
+    const halfX = box[0] / 2;
+    const halfY = box[1] / 2;
+    const halfZ = box[2] / 2;
+
+    const t = state.clock.getElapsedTime();
+
+    for (let i = 0; i < count; i++) {
+      const ix = i * 3 + 0;
+      const iy = i * 3 + 1;
+      const iz = i * 3 + 2;
+
+      // primary motion
+      pos[ix] += dir.x * speed * delta;
+      pos[iy] += dir.y * speed * delta;
+      pos[iz] += dir.z * speed * delta;
+
+      // optional swirl around direction axis (simple fake)
+      if (swirl > 0) {
+        const p = phases[i] + t * (0.8 + swirl * 1.2);
+        pos[iy] += Math.sin(p) * swirl * 0.02;
+        pos[iz] += Math.cos(p) * swirl * 0.02;
+      }
+
+      // loop inside bounds
+      if (pos[ix] > halfX) pos[ix] = -halfX;
+      if (pos[ix] < -halfX) pos[ix] = halfX;
+
+      if (pos[iy] > halfY) pos[iy] = -halfY;
+      if (pos[iy] < -halfY) pos[iy] = halfY;
+
+      if (pos[iz] > halfZ) pos[iz] = -halfZ;
+      if (pos[iz] < -halfZ) pos[iz] = halfZ;
+    }
+
+    points.current.geometry.attributes.position.needsUpdate = true;
+  });
+
+  return (
+    <points ref={points}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+      </bufferGeometry>
+      <pointsMaterial
+        size={size}
+        color={color}
+        transparent
+        opacity={0.9}
+        depthWrite={false}
+      />
+    </points>
+  );
+}
+
+function UiButton({ children, onClick, disabled }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        border: "none",
+        borderRadius: 12,
+        padding: "10px 14px",
+        cursor: disabled ? "not-allowed" : "pointer",
+        background: disabled ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.75)",
+        backdropFilter: "blur(10px)",
+        boxShadow: "0 10px 30px rgba(0,0,0,0.14)",
+        fontFamily: "Inter, system-ui, Arial",
+        fontSize: 13,
+        fontWeight: 700,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Callout({ title, subtitle, icon = "💧" }) {
+  return (
+    <div
+      style={{
+        background: "rgba(255,255,255,0.86)",
+        padding: "10px 12px",
+        borderRadius: 16,
+        fontFamily: "Inter, system-ui, Arial",
+        boxShadow: "0 10px 30px rgba(0,0,0,0.14)",
+        display: "flex",
+        gap: 10,
+        alignItems: "center",
+      }}
+    >
+      <div
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 999,
+          background: "rgba(59,130,246,0.12)",
+          display: "grid",
+          placeItems: "center",
+          fontSize: 16,
+        }}
+      >
+        {icon}
+      </div>
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.1 }}>
+          {title}
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>
+          {subtitle}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AwgModel({
+  step,
+  fluidFlow = 0.6,
+  tempCondensation = 0.55,
+}) {
+  const group = useRef();
+
+  const fanRef = useRef();
+  const coilRef = useRef();
+  const uvRef = useRef();
+  const tapRef = useRef();
+  const dirtyTankRef = useRef();
+  const cleanTankRef = useRef();
+
+  // Materials (keep stable to edit emissive/intensity)
+  const uvMat = useMemo(() => {
+    const m = new THREE.MeshStandardMaterial({
+      color: new THREE.Color("#7c3aed"),
+      emissive: new THREE.Color("#a78bfa"),
+      emissiveIntensity: 0.15,
+      metalness: 0.15,
+      roughness: 0.35,
+    });
+    return m;
+  }, []);
+
+  const coilMat = useMemo(() => {
+    const m = new THREE.MeshStandardMaterial({
+      color: new THREE.Color("#2563eb"),
+      metalness: 0.35,
+      roughness: 0.32,
+    });
+    return m;
+  }, []);
+
+  const pipeMat = useMemo(() => {
+    return new THREE.MeshStandardMaterial({
+      color: new THREE.Color("#111827"),
+      metalness: 0.25,
+      roughness: 0.55,
+    });
+  }, []);
+
+  const bodyMat = useMemo(() => {
+    return new THREE.MeshStandardMaterial({
+      color: new THREE.Color("#d7dbe2"),
+      metalness: 0.62,
+      roughness: 0.22,
+    });
+  }, []);
+
+  const glassMat = useMemo(() => {
+    return new THREE.MeshPhysicalMaterial({
+      color: new THREE.Color("#ffffff"),
+      transparent: true,
+      opacity: 0.18,
+      roughness: 0.08,
+      metalness: 0.0,
+      transmission: 1.0,
+      thickness: 0.15,
+      ior: 1.45,
+      clearcoat: 0.4,
+      clearcoatRoughness: 0.1,
+    });
+  }, []);
+
+  const waterMatDirty = useMemo(() => {
+    return new THREE.MeshStandardMaterial({
+      color: new THREE.Color("#9ca3af"),
+      transparent: true,
+      opacity: 0.55,
+      roughness: 0.15,
+      metalness: 0.0,
+    });
+  }, []);
+
+  const waterMatClean = useMemo(() => {
+    return new THREE.MeshStandardMaterial({
+      color: new THREE.Color("#60a5fa"),
+      transparent: true,
+      opacity: 0.55,
+      roughness: 0.12,
+      metalness: 0.0,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!group.current) return;
+
+    const tl = gsap.timeline({ defaults: { duration: 0.65, ease: "power2.out" } });
+
+    const targetRotY = (() => {
+      if (step === "air") return 0.25;
+      if (step === "condensation") return 0.45;
+      if (step === "filtration") return 0.15;
+      if (step === "uv_tank") return -0.15;
+      if (step === "dispense") return -0.35;
+      if (step === "mineral") return 0.05;
+      return 0.15;
+    })();
+
+    tl.to(group.current.rotation, { y: targetRotY });
+
+    // subtle zoom / lift feel
+    tl.to(group.current.position, { y: -0.25 + (step === "dispense" ? 0.02 : 0) }, 0);
+
+    return () => tl.kill();
+  }, [step]);
+
+  useFrame((state, delta) => {
+    const flow = clamp01(fluidFlow);
+    const cond = clamp01(tempCondensation);
+
+    if (fanRef.current) {
+      const base = 1.2 + flow * 10.0;
+      const mult = step === "air" ? 1.0 : 0.25;
+      fanRef.current.rotation.z += base * mult * delta;
+    }
+
+    if (coilRef.current && coilRef.current.material) {
+      // simulate "colder coil" by slightly increasing emissive + making it brighter
+      const coil = coilRef.current.material;
+      coil.emissive = coil.emissive || new THREE.Color("#000000");
+      const intensity = step === "condensation" ? 0.3 + cond * 0.8 : 0.05;
+      coil.emissiveIntensity = intensity;
+      coil.needsUpdate = true;
+    }
+
+    if (uvRef.current) {
+      uvMat.emissiveIntensity = step === "uv_tank" ? 0.7 + flow * 0.8 : 0.12;
+    }
+
+    // water levels (simple)
+    if (dirtyTankRef.current) {
+      const target = step === "filtration" || step === "condensation" ? 0.18 : 0.22;
+      dirtyTankRef.current.scale.y += (target - dirtyTankRef.current.scale.y) * (1 - Math.pow(0.001, delta));
+    }
+    if (cleanTankRef.current) {
+      const target =
+        step === "uv_tank" || step === "dispense" || step === "mineral" ? 0.32 : 0.25;
+      cleanTankRef.current.scale.y += (target - cleanTankRef.current.scale.y) * (1 - Math.pow(0.001, delta));
+    }
+  });
+
+  // Particles speeds mapped to sliders
+  const airSpeed = 0.2 + clamp01(fluidFlow) * 0.75;
+  const waterSpeed = 0.15 + clamp01(fluidFlow) * 1.0;
+  const condSpeed = 0.08 + clamp01(tempCondensation) * 0.45;
+
+  return (
+    <group ref={group} position={[0, -0.25, 0]}>
+      {/* BODY (cutaway style box) */}
+      <mesh material={bodyMat}>
+        <roundedBoxGeometry args={[2.25, 1.45, 1.45, 6, 0.08]} />
+      </mesh>
+
+      {/* INNER CAVITY (fake dark interior plate) */}
+      <mesh position={[0.0, 0.02, -0.12]}>
+        <boxGeometry args={[2.05, 1.22, 1.12]} />
+        <meshStandardMaterial color="#0b1220" roughness={0.85} metalness={0.0} />
+      </mesh>
+
+      {/* FAN */}
+      <group position={[-0.95, 0.26, 0.42]}>
+        <mesh>
+          <circleGeometry args={[0.26, 44]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.7} metalness={0.15} />
+        </mesh>
+        <mesh ref={fanRef} position={[0, 0, 0.02]}>
+          <circleGeometry args={[0.22, 36]} />
+          <meshStandardMaterial color="#1f2937" roughness={0.45} metalness={0.35} />
+        </mesh>
+      </group>
+
+      {/* COIL (torus stack) */}
+      <group position={[0.35, 0.35, 0.18]} ref={coilRef}>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <mesh key={i} position={[i * 0.08 - 0.16, 0, 0]} material={coilMat}>
+            <torusGeometry args={[0.28, 0.038, 16, 80]} />
+          </mesh>
+        ))}
+        {/* copper loop */}
+        <mesh position={[0.32, 0, 0]} material={new THREE.MeshStandardMaterial({ color: "#b45309", metalness: 0.6, roughness: 0.35 })}>
+          <torusGeometry args={[0.32, 0.02, 16, 80]} />
+        </mesh>
+      </group>
+
+      {/* PIPE + FILTER HOUSING */}
+      <group position={[-0.3, -0.07, 0.35]}>
+        <mesh material={pipeMat} position={[0, 0, 0]}>
+          <cylinderGeometry args={[0.08, 0.08, 1.35, 20]} />
+        </mesh>
+
+        {/* filter segments */}
+        <mesh position={[-0.35, 0, 0]} material={new THREE.MeshStandardMaterial({ color: "#111827", metalness: 0.25, roughness: 0.55 })}>
+          <cylinderGeometry args={[0.12, 0.12, 0.28, 20]} />
+        </mesh>
+        <mesh position={[0.0, 0, 0]} material={new THREE.MeshStandardMaterial({ color: "#374151", metalness: 0.25, roughness: 0.55 })}>
+          <cylinderGeometry args={[0.12, 0.12, 0.28, 20]} />
+        </mesh>
+        <mesh position={[0.35, 0, 0]} material={new THREE.MeshStandardMaterial({ color: "#111827", metalness: 0.25, roughness: 0.55 })}>
+          <cylinderGeometry args={[0.12, 0.12, 0.28, 20]} />
+        </mesh>
+      </group>
+
+      {/* UV TUBE */}
+      <mesh ref={uvRef} position={[0.15, -0.05, 0.35]} material={uvMat}>
+        <cylinderGeometry args={[0.055, 0.055, 0.85, 18]} />
+      </mesh>
+
+      {/* TANKS */}
+      <group position={[-0.25, -0.52, 0.06]}>
+        {/* dirty tank */}
+        <mesh position={[-0.42, 0.0, 0.15]} material={glassMat}>
+          <cylinderGeometry args={[0.26, 0.26, 0.52, 28]} />
+        </mesh>
+        <mesh
+          ref={dirtyTankRef}
+          position={[-0.42, -0.14, 0.15]}
+          scale={[1, 0.22, 1]}
+          material={waterMatDirty}
+        >
+          <cylinderGeometry args={[0.245, 0.245, 0.48, 24]} />
+        </mesh>
+
+        {/* clean tank */}
+        <mesh position={[0.25, 0.0, 0.15]} material={glassMat}>
+          <cylinderGeometry args={[0.26, 0.26, 0.52, 28]} />
+        </mesh>
+        <mesh
+          ref={cleanTankRef}
+          position={[0.25, -0.14, 0.15]}
+          scale={[1, 0.25, 1]}
+          material={waterMatClean}
+        >
+          <cylinderGeometry args={[0.245, 0.245, 0.48, 24]} />
+        </mesh>
+      </group>
+
+      {/* TAP */}
+      <group position={[1.05, -0.06, 0.55]} ref={tapRef}>
+        <mesh material={new THREE.MeshStandardMaterial({ color: "#9ca3af", metalness: 0.95, roughness: 0.18 })}>
+          <boxGeometry args={[0.26, 0.09, 0.26]} />
+        </mesh>
+        <mesh position={[0.18, -0.10, 0.0]} material={new THREE.MeshStandardMaterial({ color: "#9ca3af", metalness: 0.95, roughness: 0.18 })}>
+          <cylinderGeometry args={[0.03, 0.03, 0.22, 18]} />
+        </mesh>
+      </group>
+
+      {/* CALL-OUTS (right side) */}
+      <Html position={[1.25, 0.1, 0.2]} transform occlude style={{ width: 280 }}>
+        <div style={{ display: "grid", gap: 10 }}>
+          <Callout
+            icon="🧱"
+            title="SEDIMENT FILTER"
+            subtitle="Retiene partículas y sólidos en suspensión."
+          />
+          <Callout
+            icon="⚫"
+            title="CARBON FILTER"
+            subtitle="Reduce químicos, cloro y olores."
+          />
+          <Callout
+            icon="🧪"
+            title="MINERALIZACIÓN"
+            subtitle="Ajuste de minerales para mejor sabor."
+          />
+        </div>
+      </Html>
+
+      {/* TOP LEFT (Paso actual) */}
+      <Html position={[-1.05, 0.95, 0.35]} transform occlude style={{ width: 240 }}>
+        <div
+          style={{
+            background: "rgba(255,255,255,0.78)",
+            padding: "10px 12px",
+            borderRadius: 16,
+            backdropFilter: "blur(10px)",
+            fontFamily: "Inter, system-ui, Arial",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 900 }}>GENERADOR AWG INTERACTIVO</div>
+          <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
+            Paso Actual: {STEPS.find((s) => s.key === step)?.title}
+          </div>
+        </div>
+      </Html>
+
+      {/* PARTICLES BY STEP */}
+      {/* AIR INTAKE */}
+      <group position={[-1.22, 0.26, 0.42]}>
+        <Particles
+          active={step === "air"}
+          color="#93c5fd"
+          speed={airSpeed}
+          size={0.012}
+          box={[1.3, 0.45, 0.45]}
+          direction={[1, 0, 0]}
+          swirl={0.6}
+        />
+      </group>
+
+      {/* CONDENSATION */}
+      <group position={[0.35, 0.35, 0.18]}>
+        <Particles
+          active={step === "condensation"}
+          color="#bfdbfe"
+          speed={condSpeed}
+          size={0.01}
+          box={[0.6, 0.35, 0.35]}
+          direction={[0, -1, 0]}
+          swirl={0.3}
+        />
+      </group>
+
+      {/* FILTRATION FLOW */}
+      <group position={[-0.3, -0.07, 0.35]}>
+        <Particles
+          active={step === "filtration"}
+          color="#60a5fa"
+          speed={waterSpeed}
+          size={0.01}
+          box={[1.5, 0.22, 0.22]}
+          direction={[1, 0, 0]}
+          swirl={0.2}
+        />
+      </group>
+
+      {/* UV + TANK */}
+      <group position={[0.15, -0.05, 0.35]}>
+        <Particles
+          active={step === "uv_tank"}
+          color="#a78bfa"
+          speed={0.15 + waterSpeed * 0.35}
+          size={0.01}
+          box={[0.9, 0.25, 0.25]}
+          direction={[1, 0, 0]}
+          swirl={0.15}
+        />
+      </group>
+
+      {/* DISPENSE */}
+      <group position={[1.05, -0.18, 0.55]}>
+        <Particles
+          active={step === "dispense"}
+          color="#7dd3fc"
+          speed={0.25 + waterSpeed * 0.35}
+          size={0.012}
+          box={[0.25, 0.45, 0.25]}
+          direction={[0, -1, 0]}
+          swirl={0.0}
+        />
+      </group>
+
+      {/* MINERALIZATION */}
+      <group position={[0.05, -0.12, 0.25]}>
+        <Particles
+          active={step === "mineral"}
+          color="#f59e0b"
+          speed={0.08 + waterSpeed * 0.18}
+          size={0.01}
+          box={[0.8, 0.25, 0.25]}
+          direction={[1, 0, 0]}
+          swirl={0.25}
+        />
+      </group>
+
+      {/* GLASS CUP (outside) */}
+      <group position={[1.45, -0.62, 0.7]}>
+        <mesh material={glassMat}>
+          <cylinderGeometry args={[0.18, 0.18, 0.36, 28]} />
+        </mesh>
+        <mesh position={[0, -0.08, 0]} material={waterMatClean}>
+          <cylinderGeometry args={[0.165, 0.165, 0.18, 24]} />
+        </mesh>
+      </group>
+    </group>
+  );
+}
+
+function StepDots({ stepIndex, setStepIndex }) {
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+      {STEPS.map((s, idx) => (
+        <button
+          key={s.key}
+          onClick={() => setStepIndex(idx)}
+          aria-label={s.title}
+          style={{
+            width: 12,
+            height: 12,
+            borderRadius: 999,
+            border: "none",
+            cursor: "pointer",
+            background: idx === stepIndex ? "rgba(59,130,246,0.95)" : "rgba(255,255,255,0.55)",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+export default function AwgSimulator() {
+  const [stepIndex, setStepIndex] = useState(0);
+  const step = STEPS[stepIndex].key;
+
+  const { fluidFlow, tempCondensation } = useControls({
+    fluidFlow: { value: 0.62, min: 0, max: 1, step: 0.01, label: "FLUID FLOW" },
+    tempCondensation: { value: 0.58, min: 0, max: 1, step: 0.01, label: "TEMP. CONDENSACIÓN" },
+  });
+
+  // Optional: autoplay demo
+  const [autoPlay, setAutoPlay] = useState(false);
+  useEffect(() => {
+    if (!autoPlay) return;
+    const id = setInterval(() => {
+      setStepIndex((i) => (i + 1) % STEPS.length);
+    }, 3200);
+    return () => clearInterval(id);
+  }, [autoPlay]);
+
+  return (
+    <div style={{ height: "100vh", width: "100%", background: "#eaf2ff", position: "relative" }}>
+      <Leva collapsed />
+
+      {/* TOP LEFT HEADER (like your image) */}
+      <div
+        style={{
+          position: "absolute",
+          left: 18,
+          top: 18,
+          zIndex: 10,
+          background: "rgba(255,255,255,0.74)",
+          borderRadius: 16,
+          padding: "10px 12px",
+          backdropFilter: "blur(10px)",
+          fontFamily: "Inter, system-ui, Arial",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 0.3 }}>
+          GENERADOR AWG INTERACTIVO
+        </div>
+        <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
+          Paso Actual: {STEPS[stepIndex].title}
+        </div>
+      </div>
+
+      {/* BOTTOM LEFT CONTROLS (like your image) */}
+      <div
+        style={{
+          position: "absolute",
+          left: 18,
+          bottom: 18,
+          zIndex: 10,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <div
+          style={{
+            background: "rgba(255,255,255,0.62)",
+            borderRadius: 16,
+            padding: "10px 12px",
+            backdropFilter: "blur(10px)",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+            fontFamily: "Inter, system-ui, Arial",
+            width: 320,
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 0.25 }}>CONTROLES</div>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>
+              Flow {fluidFlow.toFixed(2)} · Cond {tempCondensation.toFixed(2)}
+            </div>
+          </div>
+          <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6 }}>
+            Ajusta sliders en el panel (Leva) o usa los pasos.
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <UiButton onClick={() => setStepIndex((i) => Math.max(0, i - 1))} disabled={stepIndex === 0}>
+            ◀ Anterior
+          </UiButton>
+          <UiButton onClick={() => setStepIndex((i) => Math.min(STEPS.length - 1, i + 1))} disabled={stepIndex === STEPS.length - 1}>
+            Siguiente ▶
+          </UiButton>
+          <UiButton onClick={() => setStepIndex(0)}>Reiniciar</UiButton>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <UiButton onClick={() => setAutoPlay((v) => !v)}>
+            {autoPlay ? "⏸ Pausar Demo" : "▶ Demo Auto"}
+          </UiButton>
+          <StepDots stepIndex={stepIndex} setStepIndex={setStepIndex} />
+        </div>
+      </div>
+
+      <Canvas camera={{ position: [3.2, 1.2, 3.2], fov: 35 }}>
+        <ambientLight intensity={0.6} />
+        <directionalLight position={[5, 6, 3]} intensity={1.15} />
+        <Environment preset="warehouse" />
+
+        {/* Note: this uses placeholder geometry.
+            Replace with your real GLB by loading it with useGLTF and mapping nodes to parts. */}
+        <AwgModel
+          step={step}
+          fluidFlow={fluidFlow}
+          tempCondensation={tempCondensation}
+        />
+
+        <OrbitControls enablePan={false} minDistance={2.8} maxDistance={6.0} />
+      </Canvas>
+    </div>
+  );
+}
+
+/**
+ * IMPORTANT NOTE:
+ * This file uses <roundedBoxGeometry />, which is provided by drei as a geometry component only when imported.
+ * If your setup doesn't recognize it, replace roundedBoxGeometry with boxGeometry, OR import RoundedBox:
+ *
+ *   import { RoundedBox } from "@react-three/drei";
+ *   ... then use <RoundedBox args={[2.25,1.45,1.45]} radius={0.08} smoothness={6}><meshStandardMaterial .../></RoundedBox>
+ *
+ */
