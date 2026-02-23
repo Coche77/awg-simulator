@@ -1,12 +1,11 @@
 // src/AwgSimulator.jsx
-// React + Three.js (React Three Fiber) interactive 3D AWG simulator (updated)
-// ✅ Fix: replaced <roundedBoxGeometry /> with <boxGeometry /> to avoid runtime blank screen on GH Pages
-// ✅ Fix: removed "new THREE.Material()" allocations inside render loops (stability/perf)
+// React + Three.js (React Three Fiber) interactive 3D AWG simulator (polished shell body)
+// Usage: import AwgSimulator from "./AwgSimulator.jsx"; render <AwgSimulator />
 
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Environment, OrbitControls, Html } from "@react-three/drei";
+import { OrbitControls, Html } from "@react-three/drei";
 import gsap from "gsap";
 import { Leva, useControls } from "leva";
 
@@ -60,8 +59,8 @@ function Particles({
 
   useFrame((state, delta) => {
     if (!active || !points.current) return;
-
     const pos = points.current.geometry.attributes.position.array;
+
     const halfX = box[0] / 2;
     const halfY = box[1] / 2;
     const halfZ = box[2] / 2;
@@ -73,16 +72,19 @@ function Particles({
       const iy = i * 3 + 1;
       const iz = i * 3 + 2;
 
+      // primary motion
       pos[ix] += dir.x * speed * delta;
       pos[iy] += dir.y * speed * delta;
       pos[iz] += dir.z * speed * delta;
 
+      // optional swirl around direction axis (simple fake)
       if (swirl > 0) {
         const p = phases[i] + t * (0.8 + swirl * 1.2);
         pos[iy] += Math.sin(p) * swirl * 0.02;
         pos[iz] += Math.cos(p) * swirl * 0.02;
       }
 
+      // loop inside bounds
       if (pos[ix] > halfX) pos[ix] = -halfX;
       if (pos[ix] < -halfX) pos[ix] = halfX;
 
@@ -172,100 +174,96 @@ function Callout({ title, subtitle, icon = "💧" }) {
 
 function AwgModel({ step, fluidFlow = 0.6, tempCondensation = 0.55 }) {
   const group = useRef();
-
   const fanRef = useRef();
   const coilRef = useRef();
   const uvRef = useRef();
-  const tapRef = useRef();
   const dirtyTankRef = useRef();
   const cleanTankRef = useRef();
 
-  const uvMat = useMemo(() => {
-    return new THREE.MeshStandardMaterial({
-      color: new THREE.Color("#7c3aed"),
-      emissive: new THREE.Color("#a78bfa"),
-      emissiveIntensity: 0.15,
-      metalness: 0.15,
-      roughness: 0.35,
-    });
-  }, []);
+  const uvMat = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color("#7c3aed"),
+        emissive: new THREE.Color("#a78bfa"),
+        emissiveIntensity: 0.15,
+        metalness: 0.15,
+        roughness: 0.35,
+      }),
+    []
+  );
 
-  const coilMat = useMemo(() => {
-    return new THREE.MeshStandardMaterial({
-      color: new THREE.Color("#2563eb"),
-      metalness: 0.35,
-      roughness: 0.32,
-      emissive: new THREE.Color("#60a5fa"),
-      emissiveIntensity: 0.05,
-    });
-  }, []);
+  const coilMat = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color("#2563eb"),
+        emissive: new THREE.Color("#93c5fd"),
+        emissiveIntensity: 0.05,
+        metalness: 0.35,
+        roughness: 0.32,
+      }),
+    []
+  );
 
-  const pipeMat = useMemo(() => {
-    return new THREE.MeshStandardMaterial({
-      color: new THREE.Color("#111827"),
-      metalness: 0.25,
-      roughness: 0.55,
-    });
-  }, []);
+  const pipeMat = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color("#111827"),
+        metalness: 0.25,
+        roughness: 0.55,
+      }),
+    []
+  );
 
-  const bodyMat = useMemo(() => {
-    return new THREE.MeshStandardMaterial({
-      color: new THREE.Color("#d7dbe2"),
-      metalness: 0.62,
-      roughness: 0.22,
-    });
-  }, []);
+  const bodyMat = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color("#d7dbe2"),
+        metalness: 0.62,
+        roughness: 0.22,
+      }),
+    []
+  );
 
-  const glassMat = useMemo(() => {
-    return new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color("#ffffff"),
-      transparent: true,
-      opacity: 0.18,
-      roughness: 0.08,
-      metalness: 0.0,
-      transmission: 1.0,
-      thickness: 0.15,
-      ior: 1.45,
-      clearcoat: 0.4,
-      clearcoatRoughness: 0.1,
-    });
-  }, []);
+  const glassMat = useMemo(
+    () =>
+      new THREE.MeshPhysicalMaterial({
+        color: new THREE.Color("#ffffff"),
+        transparent: true,
+        opacity: 0.18,
+        roughness: 0.08,
+        metalness: 0.0,
+        transmission: 1.0,
+        thickness: 0.15,
+        ior: 1.45,
+        clearcoat: 0.4,
+        clearcoatRoughness: 0.1,
+      }),
+    []
+  );
 
-  const waterMatDirty = useMemo(() => {
-    return new THREE.MeshStandardMaterial({
-      color: new THREE.Color("#9ca3af"),
-      transparent: true,
-      opacity: 0.55,
-      roughness: 0.15,
-      metalness: 0.0,
-    });
-  }, []);
+  const waterMatDirty = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color("#9ca3af"),
+        transparent: true,
+        opacity: 0.55,
+        roughness: 0.15,
+        metalness: 0.0,
+      }),
+    []
+  );
 
-  const waterMatClean = useMemo(() => {
-    return new THREE.MeshStandardMaterial({
-      color: new THREE.Color("#60a5fa"),
-      transparent: true,
-      opacity: 0.55,
-      roughness: 0.12,
-      metalness: 0.0,
-    });
-  }, []);
-
-  const metalMat = useMemo(() => {
-    return new THREE.MeshStandardMaterial({ color: "#9ca3af", metalness: 0.95, roughness: 0.18 });
-  }, []);
-
-  const copperMat = useMemo(() => {
-    return new THREE.MeshStandardMaterial({ color: "#b45309", metalness: 0.6, roughness: 0.35 });
-  }, []);
-
-  const filterMat1 = useMemo(() => {
-    return new THREE.MeshStandardMaterial({ color: "#111827", metalness: 0.25, roughness: 0.55 });
-  }, []);
-
-  const filterMat2 = useMemo(() => {
-    return new THREE.MeshStandardMaterial({ color: "#374151", metalness: 0.25, roughness: 0.55 });
-  }, []);
+  const waterMatClean = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color("#60a5fa"),
+        transparent: true,
+        opacity: 0.55,
+        roughness: 0.12,
+        metalness: 0.0,
+      }),
+    []
+  );
 
   useEffect(() => {
     if (!group.current) return;
@@ -283,7 +281,7 @@ function AwgModel({ step, fluidFlow = 0.6, tempCondensation = 0.55 }) {
     })();
 
     tl.to(group.current.rotation, { y: targetRotY });
-    tl.to(group.current.position, { y: -0.25 + (step === "dispense" ? 0.02 : 0) }, 0);
+    tl.to(group.current.position, { y: -0.05 + (step === "dispense" ? 0.02 : 0) }, 0);
 
     return () => tl.kill();
   }, [step]);
@@ -298,8 +296,9 @@ function AwgModel({ step, fluidFlow = 0.6, tempCondensation = 0.55 }) {
       fanRef.current.rotation.z += base * mult * delta;
     }
 
-    if (coilRef.current) {
-      coilMat.emissiveIntensity = step === "condensation" ? 0.3 + cond * 0.8 : 0.05;
+    if (coilRef.current && coilRef.current.material) {
+      const intensity = step === "condensation" ? 0.3 + cond * 0.8 : 0.05;
+      coilMat.emissiveIntensity = intensity;
     }
 
     if (uvRef.current) {
@@ -323,18 +322,21 @@ function AwgModel({ step, fluidFlow = 0.6, tempCondensation = 0.55 }) {
   const condSpeed = 0.08 + clamp01(tempCondensation) * 0.45;
 
   return (
-    <group ref={group} position={[0, -0.25, 0]}>
-      {/* BODY (cutaway style box) */}
+    <group ref={group} position={[0, -0.05, 0]}>
+      {/* ==== CARCASA TIPO SHELL (PASO 1) ==== */}
       <mesh material={bodyMat}>
-        {/* ✅ FIX: roundedBoxGeometry -> boxGeometry */}
         <boxGeometry args={[2.25, 1.45, 1.45]} />
       </mesh>
 
-      {/* INNER CAVITY (fake dark interior plate) */}
-      <mesh position={[0.0, 0.02, -0.12]}>
-        <boxGeometry args={[2.05, 1.22, 1.12]} />
-        <meshStandardMaterial color="#0b1220" roughness={0.85} metalness={0.0} />
+      <mesh position={[0, 0, -0.02]}>
+        <boxGeometry args={[2.05, 1.25, 1.25]} />
+        <meshStandardMaterial color="#0b1220" roughness={0.95} metalness={0.0} />
       </mesh>
+
+      <mesh position={[0, 0.02, 0.73]} material={glassMat}>
+        <boxGeometry args={[2.02, 1.22, 0.04]} />
+      </mesh>
+      {/* ==== FIN SHELL ==== */}
 
       {/* FAN */}
       <group position={[-0.95, 0.26, 0.42]}>
@@ -348,14 +350,21 @@ function AwgModel({ step, fluidFlow = 0.6, tempCondensation = 0.55 }) {
         </mesh>
       </group>
 
-      {/* COIL (torus stack) */}
-      <group position={[0.35, 0.35, 0.18]} ref={coilRef}>
+      {/* COIL */}
+      <group position={[0.35, 0.35, 0.18]}>
         {Array.from({ length: 5 }).map((_, i) => (
-          <mesh key={`coil-${i}`} position={[i * 0.08 - 0.16, 0, 0]} material={coilMat}>
+          <mesh key={i} position={[i * 0.08 - 0.16, 0, 0]} material={coilMat} ref={i === 0 ? coilRef : null}>
             <torusGeometry args={[0.28, 0.038, 16, 80]} />
           </mesh>
         ))}
-        <mesh position={[0.32, 0, 0]} material={copperMat}>
+        <mesh
+          position={[0.32, 0, 0]}
+          material={new THREE.MeshStandardMaterial({
+            color: "#b45309",
+            metalness: 0.6,
+            roughness: 0.35,
+          })}
+        >
           <torusGeometry args={[0.32, 0.02, 16, 80]} />
         </mesh>
       </group>
@@ -366,13 +375,13 @@ function AwgModel({ step, fluidFlow = 0.6, tempCondensation = 0.55 }) {
           <cylinderGeometry args={[0.08, 0.08, 1.35, 20]} />
         </mesh>
 
-        <mesh position={[-0.35, 0, 0]} material={filterMat1}>
+        <mesh position={[-0.35, 0, 0]} material={pipeMat}>
           <cylinderGeometry args={[0.12, 0.12, 0.28, 20]} />
         </mesh>
-        <mesh position={[0.0, 0, 0]} material={filterMat2}>
+        <mesh position={[0.0, 0, 0]} material={new THREE.MeshStandardMaterial({ color: "#374151", metalness: 0.25, roughness: 0.55 })}>
           <cylinderGeometry args={[0.12, 0.12, 0.28, 20]} />
         </mesh>
-        <mesh position={[0.35, 0, 0]} material={filterMat1}>
+        <mesh position={[0.35, 0, 0]} material={pipeMat}>
           <cylinderGeometry args={[0.12, 0.12, 0.28, 20]} />
         </mesh>
       </group>
@@ -384,7 +393,6 @@ function AwgModel({ step, fluidFlow = 0.6, tempCondensation = 0.55 }) {
 
       {/* TANKS */}
       <group position={[-0.25, -0.52, 0.06]}>
-        {/* dirty tank */}
         <mesh position={[-0.42, 0.0, 0.15]} material={glassMat}>
           <cylinderGeometry args={[0.26, 0.26, 0.52, 28]} />
         </mesh>
@@ -397,7 +405,6 @@ function AwgModel({ step, fluidFlow = 0.6, tempCondensation = 0.55 }) {
           <cylinderGeometry args={[0.245, 0.245, 0.48, 24]} />
         </mesh>
 
-        {/* clean tank */}
         <mesh position={[0.25, 0.0, 0.15]} material={glassMat}>
           <cylinderGeometry args={[0.26, 0.26, 0.52, 28]} />
         </mesh>
@@ -412,11 +419,11 @@ function AwgModel({ step, fluidFlow = 0.6, tempCondensation = 0.55 }) {
       </group>
 
       {/* TAP */}
-      <group position={[1.05, -0.06, 0.55]} ref={tapRef}>
-        <mesh material={metalMat}>
+      <group position={[1.05, -0.06, 0.55]}>
+        <mesh material={new THREE.MeshStandardMaterial({ color: "#9ca3af", metalness: 0.95, roughness: 0.18 })}>
           <boxGeometry args={[0.26, 0.09, 0.26]} />
         </mesh>
-        <mesh position={[0.18, -0.10, 0.0]} material={metalMat}>
+        <mesh position={[0.18, -0.10, 0.0]} material={new THREE.MeshStandardMaterial({ color: "#9ca3af", metalness: 0.95, roughness: 0.18 })}>
           <cylinderGeometry args={[0.03, 0.03, 0.22, 18]} />
         </mesh>
       </group>
@@ -430,6 +437,7 @@ function AwgModel({ step, fluidFlow = 0.6, tempCondensation = 0.55 }) {
         </div>
       </Html>
 
+      {/* TOP LEFT STEP */}
       <Html position={[-1.05, 0.95, 0.35]} transform occlude style={{ width: 240 }}>
         <div
           style={{
@@ -449,7 +457,7 @@ function AwgModel({ step, fluidFlow = 0.6, tempCondensation = 0.55 }) {
       </Html>
 
       {/* PARTICLES BY STEP */}
-      <group position={[-1.22, 0.26, 0.42]}>
+      <group position={[-1.05, 0.26, 0.42]}>
         <Particles
           active={step === "air"}
           color="#93c5fd"
@@ -521,7 +529,7 @@ function AwgModel({ step, fluidFlow = 0.6, tempCondensation = 0.55 }) {
         />
       </group>
 
-      {/* GLASS CUP (outside) */}
+      {/* GLASS CUP */}
       <group position={[1.45, -0.62, 0.7]}>
         <mesh material={glassMat}>
           <cylinderGeometry args={[0.18, 0.18, 0.36, 28]} />
@@ -574,10 +582,16 @@ export default function AwgSimulator() {
   }, [autoPlay]);
 
   return (
-    <div style={{ height: "100vh", width: "100%", background: "#eaf2ff", position: "relative" }}>
-      <Leva collapsed />
+    <div
+      style={{
+        height: "100vh",
+        width: "100%",
+        background: "linear-gradient(#eef6ff, #eaf2ff)",
+        position: "relative",
+      }}
+    >
+      <Leva collapsed oneLineLabels />
 
-      {/* TOP LEFT HEADER */}
       <div
         style={{
           position: "absolute",
@@ -596,7 +610,6 @@ export default function AwgSimulator() {
         <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>Paso Actual: {STEPS[stepIndex].title}</div>
       </div>
 
-      {/* BOTTOM LEFT CONTROLS */}
       <div
         style={{
           position: "absolute",
@@ -625,19 +638,14 @@ export default function AwgSimulator() {
               Flow {fluidFlow.toFixed(2)} · Cond {tempCondensation.toFixed(2)}
             </div>
           </div>
-          <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6 }}>
-            Ajusta sliders en el panel (Leva) o usa los pasos.
-          </div>
+          <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6 }}>Ajusta sliders (Leva) o usa los pasos.</div>
         </div>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <UiButton onClick={() => setStepIndex((i) => Math.max(0, i - 1))} disabled={stepIndex === 0}>
             ◀ Anterior
           </UiButton>
-          <UiButton
-            onClick={() => setStepIndex((i) => Math.min(STEPS.length - 1, i + 1))}
-            disabled={stepIndex === STEPS.length - 1}
-          >
+          <UiButton onClick={() => setStepIndex((i) => Math.min(STEPS.length - 1, i + 1))} disabled={stepIndex === STEPS.length - 1}>
             Siguiente ▶
           </UiButton>
           <UiButton onClick={() => setStepIndex(0)}>Reiniciar</UiButton>
@@ -649,12 +657,22 @@ export default function AwgSimulator() {
         </div>
       </div>
 
-      <Canvas camera={{ position: [3.2, 1.2, 3.2], fov: 35 }}>
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[5, 6, 3]} intensity={1.15} />
-        <Environment preset="warehouse" />
+      <Canvas camera={{ position: [4.2, 1.35, 4.2], fov: 28 }}>
+        <ambientLight intensity={0.55} />
+        <directionalLight position={[6, 7, 4]} intensity={1.25} />
+        <directionalLight position={[-6, 2, 6]} intensity={0.55} />
+
         <AwgModel step={step} fluidFlow={fluidFlow} tempCondensation={tempCondensation} />
-        <OrbitControls enablePan={false} minDistance={2.8} maxDistance={6.0} />
+
+        <OrbitControls
+          enablePan={false}
+          enableDamping
+          dampingFactor={0.08}
+          minDistance={3.4}
+          maxDistance={7.2}
+          minPolarAngle={0.55}
+          maxPolarAngle={1.35}
+        />
       </Canvas>
     </div>
   );
