@@ -1,6 +1,7 @@
-// AwgSimulator.jsx
-// React + Three.js (React Three Fiber) interactive 3D AWG simulator skeleton
-// Usage: import AwgSimulator from "./AwgSimulator"; render <AwgSimulator />
+// src/AwgSimulator.jsx
+// React + Three.js (React Three Fiber) interactive 3D AWG simulator (updated)
+// ✅ Fix: replaced <roundedBoxGeometry /> with <boxGeometry /> to avoid runtime blank screen on GH Pages
+// ✅ Fix: removed "new THREE.Material()" allocations inside render loops (stability/perf)
 
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import * as THREE from "three";
@@ -59,8 +60,8 @@ function Particles({
 
   useFrame((state, delta) => {
     if (!active || !points.current) return;
-    const pos = points.current.geometry.attributes.position.array;
 
+    const pos = points.current.geometry.attributes.position.array;
     const halfX = box[0] / 2;
     const halfY = box[1] / 2;
     const halfZ = box[2] / 2;
@@ -72,19 +73,16 @@ function Particles({
       const iy = i * 3 + 1;
       const iz = i * 3 + 2;
 
-      // primary motion
       pos[ix] += dir.x * speed * delta;
       pos[iy] += dir.y * speed * delta;
       pos[iz] += dir.z * speed * delta;
 
-      // optional swirl around direction axis (simple fake)
       if (swirl > 0) {
         const p = phases[i] + t * (0.8 + swirl * 1.2);
         pos[iy] += Math.sin(p) * swirl * 0.02;
         pos[iz] += Math.cos(p) * swirl * 0.02;
       }
 
-      // loop inside bounds
       if (pos[ix] > halfX) pos[ix] = -halfX;
       if (pos[ix] < -halfX) pos[ix] = halfX;
 
@@ -165,22 +163,14 @@ function Callout({ title, subtitle, icon = "💧" }) {
         {icon}
       </div>
       <div>
-        <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.1 }}>
-          {title}
-        </div>
-        <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>
-          {subtitle}
-        </div>
+        <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.1 }}>{title}</div>
+        <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>{subtitle}</div>
       </div>
     </div>
   );
 }
 
-function AwgModel({
-  step,
-  fluidFlow = 0.6,
-  tempCondensation = 0.55,
-}) {
+function AwgModel({ step, fluidFlow = 0.6, tempCondensation = 0.55 }) {
   const group = useRef();
 
   const fanRef = useRef();
@@ -190,25 +180,24 @@ function AwgModel({
   const dirtyTankRef = useRef();
   const cleanTankRef = useRef();
 
-  // Materials (keep stable to edit emissive/intensity)
   const uvMat = useMemo(() => {
-    const m = new THREE.MeshStandardMaterial({
+    return new THREE.MeshStandardMaterial({
       color: new THREE.Color("#7c3aed"),
       emissive: new THREE.Color("#a78bfa"),
       emissiveIntensity: 0.15,
       metalness: 0.15,
       roughness: 0.35,
     });
-    return m;
   }, []);
 
   const coilMat = useMemo(() => {
-    const m = new THREE.MeshStandardMaterial({
+    return new THREE.MeshStandardMaterial({
       color: new THREE.Color("#2563eb"),
       metalness: 0.35,
       roughness: 0.32,
+      emissive: new THREE.Color("#60a5fa"),
+      emissiveIntensity: 0.05,
     });
-    return m;
   }, []);
 
   const pipeMat = useMemo(() => {
@@ -262,6 +251,22 @@ function AwgModel({
     });
   }, []);
 
+  const metalMat = useMemo(() => {
+    return new THREE.MeshStandardMaterial({ color: "#9ca3af", metalness: 0.95, roughness: 0.18 });
+  }, []);
+
+  const copperMat = useMemo(() => {
+    return new THREE.MeshStandardMaterial({ color: "#b45309", metalness: 0.6, roughness: 0.35 });
+  }, []);
+
+  const filterMat1 = useMemo(() => {
+    return new THREE.MeshStandardMaterial({ color: "#111827", metalness: 0.25, roughness: 0.55 });
+  }, []);
+
+  const filterMat2 = useMemo(() => {
+    return new THREE.MeshStandardMaterial({ color: "#374151", metalness: 0.25, roughness: 0.55 });
+  }, []);
+
   useEffect(() => {
     if (!group.current) return;
 
@@ -278,8 +283,6 @@ function AwgModel({
     })();
 
     tl.to(group.current.rotation, { y: targetRotY });
-
-    // subtle zoom / lift feel
     tl.to(group.current.position, { y: -0.25 + (step === "dispense" ? 0.02 : 0) }, 0);
 
     return () => tl.kill();
@@ -295,32 +298,26 @@ function AwgModel({
       fanRef.current.rotation.z += base * mult * delta;
     }
 
-    if (coilRef.current && coilRef.current.material) {
-      // simulate "colder coil" by slightly increasing emissive + making it brighter
-      const coil = coilRef.current.material;
-      coil.emissive = coil.emissive || new THREE.Color("#000000");
-      const intensity = step === "condensation" ? 0.3 + cond * 0.8 : 0.05;
-      coil.emissiveIntensity = intensity;
-      coil.needsUpdate = true;
+    if (coilRef.current) {
+      coilMat.emissiveIntensity = step === "condensation" ? 0.3 + cond * 0.8 : 0.05;
     }
 
     if (uvRef.current) {
       uvMat.emissiveIntensity = step === "uv_tank" ? 0.7 + flow * 0.8 : 0.12;
     }
 
-    // water levels (simple)
     if (dirtyTankRef.current) {
       const target = step === "filtration" || step === "condensation" ? 0.18 : 0.22;
-      dirtyTankRef.current.scale.y += (target - dirtyTankRef.current.scale.y) * (1 - Math.pow(0.001, delta));
+      dirtyTankRef.current.scale.y +=
+        (target - dirtyTankRef.current.scale.y) * (1 - Math.pow(0.001, delta));
     }
     if (cleanTankRef.current) {
-      const target =
-        step === "uv_tank" || step === "dispense" || step === "mineral" ? 0.32 : 0.25;
-      cleanTankRef.current.scale.y += (target - cleanTankRef.current.scale.y) * (1 - Math.pow(0.001, delta));
+      const target = step === "uv_tank" || step === "dispense" || step === "mineral" ? 0.32 : 0.25;
+      cleanTankRef.current.scale.y +=
+        (target - cleanTankRef.current.scale.y) * (1 - Math.pow(0.001, delta));
     }
   });
 
-  // Particles speeds mapped to sliders
   const airSpeed = 0.2 + clamp01(fluidFlow) * 0.75;
   const waterSpeed = 0.15 + clamp01(fluidFlow) * 1.0;
   const condSpeed = 0.08 + clamp01(tempCondensation) * 0.45;
@@ -329,7 +326,8 @@ function AwgModel({
     <group ref={group} position={[0, -0.25, 0]}>
       {/* BODY (cutaway style box) */}
       <mesh material={bodyMat}>
-        <roundedBoxGeometry args={[2.25, 1.45, 1.45, 6, 0.08]} />
+        {/* ✅ FIX: roundedBoxGeometry -> boxGeometry */}
+        <boxGeometry args={[2.25, 1.45, 1.45]} />
       </mesh>
 
       {/* INNER CAVITY (fake dark interior plate) */}
@@ -353,12 +351,11 @@ function AwgModel({
       {/* COIL (torus stack) */}
       <group position={[0.35, 0.35, 0.18]} ref={coilRef}>
         {Array.from({ length: 5 }).map((_, i) => (
-          <mesh key={i} position={[i * 0.08 - 0.16, 0, 0]} material={coilMat}>
+          <mesh key={`coil-${i}`} position={[i * 0.08 - 0.16, 0, 0]} material={coilMat}>
             <torusGeometry args={[0.28, 0.038, 16, 80]} />
           </mesh>
         ))}
-        {/* copper loop */}
-        <mesh position={[0.32, 0, 0]} material={new THREE.MeshStandardMaterial({ color: "#b45309", metalness: 0.6, roughness: 0.35 })}>
+        <mesh position={[0.32, 0, 0]} material={copperMat}>
           <torusGeometry args={[0.32, 0.02, 16, 80]} />
         </mesh>
       </group>
@@ -369,14 +366,13 @@ function AwgModel({
           <cylinderGeometry args={[0.08, 0.08, 1.35, 20]} />
         </mesh>
 
-        {/* filter segments */}
-        <mesh position={[-0.35, 0, 0]} material={new THREE.MeshStandardMaterial({ color: "#111827", metalness: 0.25, roughness: 0.55 })}>
+        <mesh position={[-0.35, 0, 0]} material={filterMat1}>
           <cylinderGeometry args={[0.12, 0.12, 0.28, 20]} />
         </mesh>
-        <mesh position={[0.0, 0, 0]} material={new THREE.MeshStandardMaterial({ color: "#374151", metalness: 0.25, roughness: 0.55 })}>
+        <mesh position={[0.0, 0, 0]} material={filterMat2}>
           <cylinderGeometry args={[0.12, 0.12, 0.28, 20]} />
         </mesh>
-        <mesh position={[0.35, 0, 0]} material={new THREE.MeshStandardMaterial({ color: "#111827", metalness: 0.25, roughness: 0.55 })}>
+        <mesh position={[0.35, 0, 0]} material={filterMat1}>
           <cylinderGeometry args={[0.12, 0.12, 0.28, 20]} />
         </mesh>
       </group>
@@ -417,36 +413,23 @@ function AwgModel({
 
       {/* TAP */}
       <group position={[1.05, -0.06, 0.55]} ref={tapRef}>
-        <mesh material={new THREE.MeshStandardMaterial({ color: "#9ca3af", metalness: 0.95, roughness: 0.18 })}>
+        <mesh material={metalMat}>
           <boxGeometry args={[0.26, 0.09, 0.26]} />
         </mesh>
-        <mesh position={[0.18, -0.10, 0.0]} material={new THREE.MeshStandardMaterial({ color: "#9ca3af", metalness: 0.95, roughness: 0.18 })}>
+        <mesh position={[0.18, -0.10, 0.0]} material={metalMat}>
           <cylinderGeometry args={[0.03, 0.03, 0.22, 18]} />
         </mesh>
       </group>
 
-      {/* CALL-OUTS (right side) */}
+      {/* CALLOUTS */}
       <Html position={[1.25, 0.1, 0.2]} transform occlude style={{ width: 280 }}>
         <div style={{ display: "grid", gap: 10 }}>
-          <Callout
-            icon="🧱"
-            title="SEDIMENT FILTER"
-            subtitle="Retiene partículas y sólidos en suspensión."
-          />
-          <Callout
-            icon="⚫"
-            title="CARBON FILTER"
-            subtitle="Reduce químicos, cloro y olores."
-          />
-          <Callout
-            icon="🧪"
-            title="MINERALIZACIÓN"
-            subtitle="Ajuste de minerales para mejor sabor."
-          />
+          <Callout icon="🧱" title="SEDIMENT FILTER" subtitle="Retiene partículas y sólidos en suspensión." />
+          <Callout icon="⚫" title="CARBON FILTER" subtitle="Reduce químicos, cloro y olores." />
+          <Callout icon="🧪" title="MINERALIZACIÓN" subtitle="Ajuste de minerales para mejor sabor." />
         </div>
       </Html>
 
-      {/* TOP LEFT (Paso actual) */}
       <Html position={[-1.05, 0.95, 0.35]} transform occlude style={{ width: 240 }}>
         <div
           style={{
@@ -466,7 +449,6 @@ function AwgModel({
       </Html>
 
       {/* PARTICLES BY STEP */}
-      {/* AIR INTAKE */}
       <group position={[-1.22, 0.26, 0.42]}>
         <Particles
           active={step === "air"}
@@ -479,7 +461,6 @@ function AwgModel({
         />
       </group>
 
-      {/* CONDENSATION */}
       <group position={[0.35, 0.35, 0.18]}>
         <Particles
           active={step === "condensation"}
@@ -492,7 +473,6 @@ function AwgModel({
         />
       </group>
 
-      {/* FILTRATION FLOW */}
       <group position={[-0.3, -0.07, 0.35]}>
         <Particles
           active={step === "filtration"}
@@ -505,7 +485,6 @@ function AwgModel({
         />
       </group>
 
-      {/* UV + TANK */}
       <group position={[0.15, -0.05, 0.35]}>
         <Particles
           active={step === "uv_tank"}
@@ -518,7 +497,6 @@ function AwgModel({
         />
       </group>
 
-      {/* DISPENSE */}
       <group position={[1.05, -0.18, 0.55]}>
         <Particles
           active={step === "dispense"}
@@ -531,7 +509,6 @@ function AwgModel({
         />
       </group>
 
-      {/* MINERALIZATION */}
       <group position={[0.05, -0.12, 0.25]}>
         <Particles
           active={step === "mineral"}
@@ -589,13 +566,10 @@ export default function AwgSimulator() {
     tempCondensation: { value: 0.58, min: 0, max: 1, step: 0.01, label: "TEMP. CONDENSACIÓN" },
   });
 
-  // Optional: autoplay demo
   const [autoPlay, setAutoPlay] = useState(false);
   useEffect(() => {
     if (!autoPlay) return;
-    const id = setInterval(() => {
-      setStepIndex((i) => (i + 1) % STEPS.length);
-    }, 3200);
+    const id = setInterval(() => setStepIndex((i) => (i + 1) % STEPS.length), 3200);
     return () => clearInterval(id);
   }, [autoPlay]);
 
@@ -603,7 +577,7 @@ export default function AwgSimulator() {
     <div style={{ height: "100vh", width: "100%", background: "#eaf2ff", position: "relative" }}>
       <Leva collapsed />
 
-      {/* TOP LEFT HEADER (like your image) */}
+      {/* TOP LEFT HEADER */}
       <div
         style={{
           position: "absolute",
@@ -618,15 +592,11 @@ export default function AwgSimulator() {
           boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
         }}
       >
-        <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 0.3 }}>
-          GENERADOR AWG INTERACTIVO
-        </div>
-        <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
-          Paso Actual: {STEPS[stepIndex].title}
-        </div>
+        <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 0.3 }}>GENERADOR AWG INTERACTIVO</div>
+        <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>Paso Actual: {STEPS[stepIndex].title}</div>
       </div>
 
-      {/* BOTTOM LEFT CONTROLS (like your image) */}
+      {/* BOTTOM LEFT CONTROLS */}
       <div
         style={{
           position: "absolute",
@@ -664,16 +634,17 @@ export default function AwgSimulator() {
           <UiButton onClick={() => setStepIndex((i) => Math.max(0, i - 1))} disabled={stepIndex === 0}>
             ◀ Anterior
           </UiButton>
-          <UiButton onClick={() => setStepIndex((i) => Math.min(STEPS.length - 1, i + 1))} disabled={stepIndex === STEPS.length - 1}>
+          <UiButton
+            onClick={() => setStepIndex((i) => Math.min(STEPS.length - 1, i + 1))}
+            disabled={stepIndex === STEPS.length - 1}
+          >
             Siguiente ▶
           </UiButton>
           <UiButton onClick={() => setStepIndex(0)}>Reiniciar</UiButton>
         </div>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <UiButton onClick={() => setAutoPlay((v) => !v)}>
-            {autoPlay ? "⏸ Pausar Demo" : "▶ Demo Auto"}
-          </UiButton>
+          <UiButton onClick={() => setAutoPlay((v) => !v)}>{autoPlay ? "⏸ Pausar Demo" : "▶ Demo Auto"}</UiButton>
           <StepDots stepIndex={stepIndex} setStepIndex={setStepIndex} />
         </div>
       </div>
@@ -682,27 +653,9 @@ export default function AwgSimulator() {
         <ambientLight intensity={0.6} />
         <directionalLight position={[5, 6, 3]} intensity={1.15} />
         <Environment preset="warehouse" />
-
-        {/* Note: this uses placeholder geometry.
-            Replace with your real GLB by loading it with useGLTF and mapping nodes to parts. */}
-        <AwgModel
-          step={step}
-          fluidFlow={fluidFlow}
-          tempCondensation={tempCondensation}
-        />
-
+        <AwgModel step={step} fluidFlow={fluidFlow} tempCondensation={tempCondensation} />
         <OrbitControls enablePan={false} minDistance={2.8} maxDistance={6.0} />
       </Canvas>
     </div>
   );
 }
-
-/**
- * IMPORTANT NOTE:
- * This file uses <roundedBoxGeometry />, which is provided by drei as a geometry component only when imported.
- * If your setup doesn't recognize it, replace roundedBoxGeometry with boxGeometry, OR import RoundedBox:
- *
- *   import { RoundedBox } from "@react-three/drei";
- *   ... then use <RoundedBox args={[2.25,1.45,1.45]} radius={0.08} smoothness={6}><meshStandardMaterial .../></RoundedBox>
- *
- */
